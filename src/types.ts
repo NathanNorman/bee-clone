@@ -5,11 +5,12 @@ export interface Puzzle {
 }
 
 export interface GameState {
-  input: string[]        // current letters typed, e.g. ['S','T','A','R']
-  foundWords: string[]   // accepted words this session
+  input: string[]
+  foundWords: string[]
+  wordTimestamps: Record<string, string>  // word → ISO timestamp
   score: number
-  surroundingLetters: string[]  // current order of surrounding tiles (shuffleable)
-  message: string        // last validation message to display (empty string = no message)
+  surroundingLetters: string[]
+  message: string
 }
 
 export type GameAction =
@@ -19,8 +20,28 @@ export type GameAction =
   | { type: 'SUBMIT_WORD' }
   | { type: 'SUBMIT_VOICE_WORD'; word: string }
   | { type: 'SHUFFLE' }
+  | {
+      type: 'HYDRATE'
+      foundWords: string[]
+      wordTimestamps: Record<string, string>
+      score: number
+    }
 
 export interface ValidationResult {
   valid: boolean
-  message: string  // e.g. "Too short", "Not in word list", "Amazing!" etc.
+  message: string
+}
+
+// Matches the Supabase game_sessions table
+export interface GameSession {
+  id: string
+  user_id: string
+  puzzle_date: string
+  found_words: string[]
+  word_timestamps: Record<string, string>
+  score: number
+  rank: string
+  started_at: string
+  genius_at: string | null
+  queen_bee_at: string | null
 }
