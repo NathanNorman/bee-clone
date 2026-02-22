@@ -1,0 +1,67 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.panel {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 420px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.header h2 { margin: 0; font-size: 1.3rem; }
+
+.close {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: #888;
+}
+
+.remaining { font-size: 1.1rem; margin: 0 0 1rem; }
+.done { color: #888; text-align: center; }
+
+.reveal {
+  background: #f7c835;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.2rem;
+  font-size: 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #f9f9f9;
+  border-radius: 6px;
+  padding: 0.4rem;
+}
+
+.pair { font-weight: 600; font-size: 0.9rem; }
+.count { font-size: 1.1rem; color: #555; }
