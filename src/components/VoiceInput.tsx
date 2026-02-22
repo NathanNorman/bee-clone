@@ -112,7 +112,7 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
 
           // Submit all words immediately and scatter them across the screen
           const positions = getRandomPositions(words.length)
-          const newFloaters: FloatingWord[] = words.map((w, idx) => {
+          const newFloaters: FloatingWord[] = words.map((w: string, idx: number) => {
             console.log(`${ts()} [CONT] submitting guess: "${w}"`)
             const result = onWordRef.current(w)
             return {
