@@ -1,0 +1,30 @@
+.display {
+  font-size: 2rem;
+  text-align: center;
+  letter-spacing: 0.1em;
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.centerLetter {
+  color: #f7da21;
+  font-weight: 800;
+}
+
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 2rem;
+  background: #333;
+  animation: blink 1s step-end infinite;
+  vertical-align: middle;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}

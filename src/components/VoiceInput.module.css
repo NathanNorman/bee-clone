@@ -1,0 +1,65 @@
+/* Interim word stage — floats above controls, out of flow, no layout impact */
+.wordStage {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.wordText {
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  color: #1a1a1a;
+  opacity: 0.75;
+}
+
+/* Floating words — fixed on screen, scattered at random positions */
+.floatingWord {
+  position: fixed;
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  z-index: 999;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: floatUp 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: center bottom;
+}
+
+.floatingCorrect {
+  color: #f7da21;
+  text-shadow: 0 2px 16px rgba(247, 218, 33, 0.35);
+}
+
+.floatingDuplicate {
+  color: #c9a227;
+  opacity: 0.55;
+}
+
+.floatingIncorrect {
+  color: #c0392b;
+}
+
+.floatingScore {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #c7900c;
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+@keyframes floatUp {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(18px)  scale(0.72); }
+  10%  { opacity: 1; transform: translateX(-50%) translateY(0)     scale(1.08); }
+  20%  { opacity: 1; transform: translateX(-50%) translateY(-6px)  scale(1.0); }
+  65%  { opacity: 1; transform: translateX(-50%) translateY(-28px) scale(1.0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-58px) scale(0.94); }
+}
