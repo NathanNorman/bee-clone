@@ -1,60 +1,70 @@
+import { useState } from 'react'
 import styles from './FoundWordsList.module.css'
-import { scoreWord } from '../lib/scoring'
-import { PUZZLE } from '../data/puzzle'
+import type { Puzzle } from '../types'
 
-interface FoundWordsListProps {
+interface Props {
   words: string[]
-  flashWord?: string
+  wordTimestamps: Record<string, string>
+  flashWord: string
+  puzzle: Puzzle
 }
 
-function isPangram(word: string): boolean {
-  const allLetters = new Set([
-    PUZZLE.center.toLowerCase(),
-    ...PUZZLE.letters.map(l => l.toLowerCase())
-  ])
+type SortMode = 'alpha' | 'time'
+
+function isPangram(word: string, puzzle: Puzzle): boolean {
+  const allLetters = new Set([puzzle.center, ...puzzle.letters].map(l => l.toLowerCase()))
   const wordLetters = new Set([...word.toLowerCase()])
   return [...allLetters].every(l => wordLetters.has(l))
 }
 
-export default function FoundWordsList({ words, flashWord }: FoundWordsListProps) {
-  // Group by first letter, sort each group by score descending
-  const grouped: Record<string, string[]> = {}
-  for (const word of words) {
-    const key = word[0].toUpperCase()
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push(word)
-  }
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
 
-  const groups = Object.keys(grouped)
-    .sort()
-    .map(letter => ({
-      letter,
-      words: [...grouped[letter]].sort((a, b) => scoreWord(b, PUZZLE) - scoreWord(a, PUZZLE))
-    }))
+export default function FoundWordsList({ words, wordTimestamps, flashWord, puzzle }: Props) {
+  const [sortMode, setSortMode] = useState<SortMode>('alpha')
+
+  const sorted = sortMode === 'alpha'
+    ? [...words].sort()
+    : [...words].sort((a, b) => {
+        const ta = wordTimestamps[a] ?? ''
+        const tb = wordTimestamps[b] ?? ''
+        return tb.localeCompare(ta)
+      })
 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        {words.length} {words.length === 1 ? 'word' : 'words'} found
+        <span className={styles.count}>{words.length} word{words.length !== 1 ? 's' : ''}</span>
+        <button
+          className={styles.sortToggle}
+          onClick={() => setSortMode(m => m === 'alpha' ? 'time' : 'alpha')}
+          title={sortMode === 'alpha' ? 'Sort by time found' : 'Sort alphabetically'}
+        >
+          {sortMode === 'alpha' ? 'A→Z' : 'Recent'}
+        </button>
       </div>
-      <div className={styles.groups}>
-        {groups.map(({ letter, words: groupWords }) => (
-          <div key={letter} className={styles.group}>
-            <div className={styles.groupLabel}>{letter}</div>
-            <ul className={styles.list}>
-              {groupWords.map(word => (
-                <li
-                  key={word}
-                  className={`${styles.word} ${word === flashWord ? styles.flash : ''} ${isPangram(word) ? styles.pangram : ''}`}
-                >
-                  <span className={styles.wordText}>{word}</span>
-                  <span className={styles.wordScore}>+{scoreWord(word, PUZZLE)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      <ul className={styles.list}>
+        {sorted.map(word => {
+          const pangramWord = isPangram(word, puzzle)
+          const timestamp = wordTimestamps[word]
+          return (
+            <li
+              key={word}
+              className={[
+                styles.word,
+                word === flashWord ? styles.flash : '',
+                pangramWord ? styles.pangram : '',
+              ].filter(Boolean).join(' ')}
+              title={timestamp ? `Found at ${formatTimestamp(timestamp)}` : undefined}
+            >
+              {word}
+              {pangramWord && <span className={styles.pangramBadge}>✦</span>}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

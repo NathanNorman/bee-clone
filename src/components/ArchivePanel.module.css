@@ -1,0 +1,32 @@
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.panel {
+  background: white; border-radius: 12px; padding: 1.5rem;
+  max-width: 380px; width: 90%; max-height: 80vh;
+  display: flex; flex-direction: column;
+}
+.header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 1rem; flex-shrink: 0;
+}
+.header h2 { margin: 0; font-size: 1.3rem; }
+.close { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #888; }
+.loading { color: #888; text-align: center; }
+.list { overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem; }
+.row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.6rem 0.8rem; border: 1.5px solid #e0e0e0; border-radius: 8px;
+  background: white; cursor: pointer; text-align: left; font-size: 0.95rem;
+  width: 100%;
+}
+.row:hover { background: #fffbeb; }
+.selected { border-color: #f7c835; background: #fffbeb; }
+.date { font-weight: 500; display: flex; align-items: center; gap: 0.4rem; }
+.todayBadge {
+  background: #f7c835; border-radius: 4px; padding: 0 5px;
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+}
+.rank { color: #555; font-size: 0.9rem; }
+.unplayed { color: #bbb; }
