@@ -27,16 +27,35 @@ const rawWords = readFileSync(ENABLE_PATH, 'utf-8')
   .map(w => w.trim().toLowerCase())
   .filter(w => w.length >= 4 && /^[a-z]+$/.test(w))
 
-console.log('Finding valid 7-letter sets...')
+// Pre-index words by their sorted unique-letter key for fast subset lookup
+// e.g. "train" → "AINRT", "trained" → "ADEINRT"
+console.log('Indexing words by letter set...')
+const wordsByLetterKey = new Map<string, string[]>()
 const sevenLetterSets = new Map<string, true>()
+
 for (const word of rawWords) {
-  const letters = new Set([...word.toUpperCase()])
-  if (letters.size === 7) {
-    const key = [...letters].sort().join('')
+  const upperLetters = [...new Set([...word.toUpperCase()])].sort()
+  const key = upperLetters.join('')
+  if (!wordsByLetterKey.has(key)) wordsByLetterKey.set(key, [])
+  wordsByLetterKey.get(key)!.push(word)
+  if (upperLetters.length === 7) {
     sevenLetterSets.set(key, true)
   }
 }
 console.log(`Found ${sevenLetterSets.size} candidate 7-letter sets`)
+
+// For a 7-letter set, get all words whose unique letters are a subset:
+// enumerate all 2^7=128 non-empty subsets and look up words for each.
+function getAnswersForSet(allLetters: string[]): string[] {
+  const n = allLetters.length  // always 7
+  const answers: string[] = []
+  for (let mask = 1; mask < (1 << n); mask++) {
+    const subset = allLetters.filter((_, i) => mask & (1 << i)).sort().join('')
+    const words = wordsByLetterKey.get(subset)
+    if (words) answers.push(...words)
+  }
+  return answers
+}
 
 console.log('Scoring candidates...')
 type Candidate = { center: string; letters: string[]; score: number; key: string }
@@ -44,14 +63,13 @@ const candidates: Candidate[] = []
 
 for (const key of sevenLetterSets.keys()) {
   const allLetters = key.split('')
-  const allLetterSet = new Set(allLetters)
+
+  // Compute answers for this letter set once, then split by center
+  const allAnswers = getAnswersForSet(allLetters)
 
   for (const center of allLetters) {
     const surrounding = allLetters.filter(l => l !== center)
-    const answers = rawWords.filter(w => {
-      const upper = w.toUpperCase()
-      return upper.includes(center) && [...upper].every(c => allLetterSet.has(c))
-    })
+    const answers = allAnswers.filter(w => w.toUpperCase().includes(center))
     const quality = scorePuzzle({ center, surrounding, answers })
     if (quality.valid) {
       candidates.push({ center, letters: surrounding, score: quality.score, key: `${center}-${key}` })
