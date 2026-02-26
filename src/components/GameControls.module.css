@@ -54,14 +54,34 @@
   background: #1a1a1a;
   border-color: #1a1a1a;
   color: #f7da21;
-  animation: micPulse 2s ease-in-out infinite;
 }
 
 .micActive:hover {
   background: #333;
 }
 
-@keyframes micPulse {
-  0%, 100% { box-shadow: 0 0 0 0   rgba(247, 218, 33, 0.35); }
-  50%       { box-shadow: 0 0 0 6px rgba(247, 218, 33, 0); }
+/* Wrapper to position EQ bars above mic button */
+.micWrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Winamp-style equalizer bars */
+.eqBars {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 28px;
+  padding: 0 2px;
+  margin-bottom: 4px;
+}
+
+.eqBar {
+  width: 5px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: #f7da21;
+  transition: height 80ms ease-out;
 }

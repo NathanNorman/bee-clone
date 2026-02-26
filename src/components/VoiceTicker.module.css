@@ -1,0 +1,78 @@
+.ticker {
+  width: 100%;
+  height: 90px;
+  flex-shrink: 0;
+  background: #fafafa;
+  border-top: 1px solid #e2e2e2;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 10px;
+}
+
+/* Ball — only moves vertically; horizontal position set inline */
+.ball {
+  position: absolute;
+  top: 8px;
+  width: 16px;
+  height: 16px;
+  background: #f7da21;
+  border-radius: 50%;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 0 8px rgba(247, 218, 33, 0.5);
+}
+
+/* Word row — translated horizontally by Framer Motion to bring active word under ball */
+.words {
+  display: flex;
+  gap: 36px;
+  align-items: flex-end;
+  padding: 0 48px;
+  white-space: nowrap;
+  will-change: transform;
+  position: absolute;
+  bottom: 10px;
+  left: 0;
+}
+
+.word {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: opacity 0.35s ease;
+}
+
+.word[data-processed='true'] {
+  opacity: 0.3;
+}
+
+.word[data-active='true'] {
+  opacity: 1;
+}
+
+.wordText {
+  font-size: 17px;
+  font-weight: 700;
+  color: #999;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.word[data-active='true'] .wordText {
+  color: #1a1a1a;
+}
+
+.feedback {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #e55;
+  text-transform: uppercase;
+}
+
+.feedback[data-valid='true'] {
+  color: #2b8a3e;
+}

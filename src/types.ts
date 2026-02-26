@@ -32,6 +32,14 @@ export interface ValidationResult {
   message: string
 }
 
+export interface TickerWord {
+  id: string
+  word: string
+  alternatives?: string[]
+  status: 'pending' | 'valid' | 'invalid'
+  feedback: string
+}
+
 // Matches the Supabase game_sessions table
 export interface GameSession {
   id: string

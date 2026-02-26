@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { Puzzle } from '../types'
 import styles from './GameControls.module.css'
 
@@ -10,6 +10,7 @@ interface GameControlsProps {
   onKeyLetter: (letter: string) => void
   onMicToggle: () => void
   micActive: boolean
+  micBands?: number[]
 }
 
 function MicIcon() {
@@ -22,8 +23,15 @@ function MicIcon() {
 }
 
 export default function GameControls({
-  puzzle, onDelete, onShuffle, onSubmit, onKeyLetter, onMicToggle, micActive
+  puzzle, onDelete, onShuffle, onSubmit, onKeyLetter, onMicToggle, micActive, micBands
 }: GameControlsProps) {
+  const onDeleteRef = useRef(onDelete)
+  const onSubmitRef = useRef(onSubmit)
+  const onKeyLetterRef = useRef(onKeyLetter)
+  useEffect(() => { onDeleteRef.current = onDelete }, [onDelete])
+  useEffect(() => { onSubmitRef.current = onSubmit }, [onSubmit])
+  useEffect(() => { onKeyLetterRef.current = onKeyLetter }, [onKeyLetter])
+
   useEffect(() => {
     const validLetters = new Set([
       puzzle.center.toUpperCase(),
@@ -32,22 +40,22 @@ export default function GameControls({
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Backspace') {
-        onDelete()
+        onDeleteRef.current()
         return
       }
       if (e.key === 'Enter') {
-        onSubmit()
+        onSubmitRef.current()
         return
       }
       const upper = e.key.toUpperCase()
       if (upper.length === 1 && validLetters.has(upper)) {
-        onKeyLetter(upper)
+        onKeyLetterRef.current(upper)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [puzzle, onDelete, onShuffle, onSubmit, onKeyLetter])
+  }, [puzzle])
 
   return (
     <div className={styles.controls}>
@@ -60,14 +68,27 @@ export default function GameControls({
       <button className={`${styles.btn} ${styles.submit}`} onClick={onSubmit}>
         Enter
       </button>
-      <button
-        className={`${styles.btn} ${styles.mic} ${micActive ? styles.micActive : ''}`}
-        onClick={onMicToggle}
-        aria-label={micActive ? 'Stop listening' : 'Start listening'}
-        aria-pressed={micActive}
-      >
-        <MicIcon />
-      </button>
+      <div className={styles.micWrap}>
+        {micActive && micBands && (
+          <div className={styles.eqBars} aria-hidden="true">
+            {micBands.map((level, i) => (
+              <div
+                key={i}
+                className={styles.eqBar}
+                style={{ height: `${Math.max(level * 100, 4)}%` }}
+              />
+            ))}
+          </div>
+        )}
+        <button
+          className={`${styles.btn} ${styles.mic} ${micActive ? styles.micActive : ''}`}
+          onClick={onMicToggle}
+          aria-label={micActive ? 'Stop listening' : 'Start listening'}
+          aria-pressed={micActive}
+        >
+          <MicIcon />
+        </button>
+      </div>
     </div>
   )
 }

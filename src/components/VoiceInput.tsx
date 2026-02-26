@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import styles from './VoiceInput.module.css'
+import { useEffect, useRef } from 'react'
+import { WORDS } from '../data/words'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SpeechRecognitionAPI: any =
@@ -8,46 +8,14 @@ const SpeechRecognitionAPI: any =
     : null
 
 const INACTIVITY_MS = 60_000
-const FLOAT_DURATION_MS = 2000
 
 interface VoiceInputProps {
   active: boolean
-  onWord: (word: string) => { valid: boolean; score: number; duplicate: boolean }
+  onWord: (word: string, alternatives?: string[]) => void
   onAutoStop: () => void
 }
 
-interface FloatingWord {
-  id: string
-  word: string
-  kind: 'correct' | 'duplicate' | 'incorrect'
-  score: number
-  x: number  // vw %
-  y: number  // vh %
-}
-
-// 8 screen zones: words get shuffled into different zones so they don't cluster
-const ZONES = [
-  { xMin: 5,  xMax: 28, yMin: 10, yMax: 35 },
-  { xMin: 40, xMax: 62, yMin: 8,  yMax: 28 },
-  { xMin: 68, xMax: 88, yMin: 10, yMax: 35 },
-  { xMin: 5,  xMax: 28, yMin: 55, yMax: 78 },
-  { xMin: 38, xMax: 62, yMin: 60, yMax: 80 },
-  { xMin: 68, xMax: 88, yMin: 55, yMax: 78 },
-  { xMin: 12, xMax: 35, yMin: 38, yMax: 52 },
-  { xMin: 60, xMax: 84, yMin: 38, yMax: 52 },
-]
-
-function getRandomPositions(count: number): Array<{ x: number; y: number }> {
-  const shuffled = [...ZONES].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, count).map(zone => ({
-    x: zone.xMin + Math.random() * (zone.xMax - zone.xMin),
-    y: zone.yMin + Math.random() * (zone.yMax - zone.yMin),
-  }))
-}
-
 export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputProps) {
-  const [interimText, setInterimText] = useState('')
-  const [floatingWords, setFloatingWords] = useState<FloatingWord[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null)
   const continuousActiveRef = useRef(false)
@@ -55,6 +23,10 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onWordRef = useRef(onWord)
   const onAutoStopRef = useRef(onAutoStop)
+  // Per result index, tracks which words we've already submitted.
+  // Interim words only go through if they're real English words (in WORDS).
+  // Final results submit anything not yet sent for that result, as a safety net.
+  const sentPerResult = useRef(new Map<number, Set<string>>())
   useEffect(() => { onWordRef.current = onWord }, [onWord])
   useEffect(() => { onAutoStopRef.current = onAutoStop }, [onAutoStop])
 
@@ -63,19 +35,9 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
     return `[${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}.${d.getMilliseconds().toString().padStart(3,'0')}]`
   }
 
-  function extractFirstWord(transcript: string): string {
-    return transcript.trim().toLowerCase().split(/\s+/)[0] ?? ''
-  }
-
   function clearPendingTimeouts() {
     pendingTimeoutsRef.current.forEach(t => clearTimeout(t))
     pendingTimeoutsRef.current = []
-  }
-
-  function scheduleTimeout(fn: () => void, delay: number) {
-    const t = setTimeout(fn, delay)
-    pendingTimeoutsRef.current.push(t)
-    return t
   }
 
   function resetInactivityTimer() {
@@ -93,58 +55,78 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
     }
   }
 
+  function submitWord(resultIdx: number, word: string, alternatives?: string[]) {
+    let sent = sentPerResult.current.get(resultIdx)
+    if (!sent) {
+      sent = new Set()
+      sentPerResult.current.set(resultIdx, sent)
+    }
+    if (sent.has(word)) return
+    sent.add(word)
+    console.log(`${ts()} [CONT] submitting[${resultIdx}]: "${word}"${alternatives?.length ? ` alts=[${alternatives.join(',')}]` : ''}`)
+    onWordRef.current(word, alternatives)
+  }
+
   function startContinuous() {
     if (!SpeechRecognitionAPI) return
     const rec = new SpeechRecognitionAPI()
     rec.lang = 'en-US'
     rec.interimResults = true
     rec.continuous = true
-    rec.maxAlternatives = 1
+    rec.maxAlternatives = 5
     rec.onresult = (e: any) => {
       resetInactivityTimer()
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const raw = e.results[i][0].transcript
-        const word = extractFirstWord(raw)
-        const confidence = (e.results[i][0].confidence * 100).toFixed(0)
-        if (e.results[i].isFinal) {
-          const words = raw.trim().toLowerCase().split(/\s+/).filter(Boolean)
-          console.log(`${ts()} [CONT] FINAL   raw="${raw}" → words=${JSON.stringify(words)} confidence=${confidence}%`)
+        const words = raw.trim().toLowerCase().split(/\s+/).filter(Boolean)
+        const isFinal = e.results[i].isFinal
 
-          // Submit all words immediately and scatter them across the screen
-          const positions = getRandomPositions(words.length)
-          const newFloaters: FloatingWord[] = words.map((w: string, idx: number) => {
-            console.log(`${ts()} [CONT] submitting guess: "${w}"`)
-            const result = onWordRef.current(w)
-            return {
-              id: `${Date.now()}-${idx}`,
-              word: w,
-              kind: result.valid ? 'correct' : result.duplicate ? 'duplicate' : 'incorrect',
-              score: result.score,
-              x: positions[idx].x,
-              y: positions[idx].y,
-            }
-          })
+        // Collect unique words from alternative hypotheses (indices 1+)
+        const altWords = new Set<string>()
+        for (let alt = 1; alt < e.results[i].length; alt++) {
+          const altTranscript = e.results[i][alt].transcript
+          const aw = altTranscript.trim().toLowerCase().split(/\s+/).filter(Boolean)
+          for (const w of aw) altWords.add(w)
+        }
+        // Remove primary words from alternatives (no duplicates)
+        for (const w of words) altWords.delete(w)
+        const alternatives = altWords.size > 0 ? Array.from(altWords) : undefined
 
-          setInterimText('')
-          setFloatingWords(prev => [...prev, ...newFloaters])
-
-          const ids = new Set(newFloaters.map(f => f.id))
-          scheduleTimeout(() => {
-            setFloatingWords(prev => prev.filter(f => !ids.has(f.id)))
-          }, FLOAT_DURATION_MS)
+        if (isFinal) {
+          const confidence = (e.results[i][0].confidence * 100).toFixed(0)
+          const altInfo = alternatives ? ` alts=${JSON.stringify(alternatives)}` : ''
+          console.log(`${ts()} [CONT] FINAL   raw="${raw}" → words=${JSON.stringify(words)} confidence=${confidence}%${altInfo}`)
+          // Submit all final words — safety net for anything interim missed
+          for (const w of words) {
+            submitWord(i, w, alternatives)
+          }
+          sentPerResult.current.delete(i)
         } else {
-          console.log(`${ts()} [CONT] interim raw="${raw}" → word="${word}"`)
-          setInterimText(raw.trim().toLowerCase())
+          // Interim: only submit words that exist in the dictionary
+          for (const w of words) {
+            if (WORDS.has(w)) {
+              submitWord(i, w, alternatives)
+            }
+          }
         }
       }
     }
     rec.onend = () => {
       if (continuousActiveRef.current) {
         console.log(`${ts()} [CONT] restarting after onend`)
-        try { rec.start() } catch (_) {}
+        setTimeout(() => {
+          if (!continuousActiveRef.current) return
+          try {
+            rec.start()
+          } catch (_) {
+            // Same instance restart failed — create fresh recognition
+            console.log(`${ts()} [CONT] restart failed, creating fresh instance`)
+            recognitionRef.current = null
+            startContinuous()
+          }
+        }, 50)
       } else {
         console.log(`${ts()} [CONT] ended`)
-        setInterimText('')
       }
     }
     rec.onerror = (e: any) => {
@@ -170,8 +152,7 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
       recognitionRef.current = null
       clearPendingTimeouts()
       clearInactivityTimer()
-      setInterimText('')
-      setFloatingWords([])
+      sentPerResult.current.clear()
     }
     return () => {
       continuousActiveRef.current = false
@@ -182,32 +163,5 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
 
-  return (
-    <>
-      {/* Interim text — absolutely positioned above controls, no flow impact */}
-      {interimText && (
-        <div className={styles.wordStage}>
-          <span className={styles.wordText}>{interimText.toUpperCase()}</span>
-        </div>
-      )}
-
-      {/* Floating words — scattered across the screen on final result */}
-      {floatingWords.map(fw => (
-        <div
-          key={fw.id}
-          className={`${styles.floatingWord} ${
-            fw.kind === 'correct'   ? styles.floatingCorrect   :
-            fw.kind === 'duplicate' ? styles.floatingDuplicate :
-            styles.floatingIncorrect
-          }`}
-          style={{ left: `${fw.x}vw`, top: `${fw.y}vh` }}
-        >
-          <span>{fw.word.toUpperCase()}</span>
-          {fw.kind === 'correct' && fw.score > 0 && (
-            <span className={styles.floatingScore}>+{fw.score}</span>
-          )}
-        </div>
-      ))}
-    </>
-  )
+  return null
 }

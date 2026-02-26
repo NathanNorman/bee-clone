@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import useAuth from './hooks/useAuth'
 import usePuzzle, { getTodayDateString } from './hooks/usePuzzle'
 import useGameSession from './hooks/useGameSession'
+import useAudioLevel from './hooks/useAudioLevel'
 import HexBoard from './components/HexBoard'
 import InputDisplay from './components/InputDisplay'
 import GameControls from './components/GameControls'
@@ -9,6 +10,7 @@ import ScoreDisplay from './components/ScoreDisplay'
 import FoundWordsList from './components/FoundWordsList'
 import Toast from './components/Toast'
 import VoiceInput from './components/VoiceInput'
+import { VoiceTicker } from './components/VoiceTicker'
 import AuthPrompt from './components/AuthPrompt'
 import HintsPanel from './components/HintsPanel'
 import StatsModal from './components/StatsModal'
@@ -18,8 +20,10 @@ import { validateWord } from './lib/validateWord'
 import { scoreWord } from './lib/scoring'
 import { getHomophones } from './lib/homophones'
 import { WORDS } from './data/words'
-import type { GameAction } from './types'
+import type { GameAction, TickerWord } from './types'
 import styles from './App.module.css'
+
+const BEAT_MS = 500
 
 type Modal = 'none' | 'hints' | 'stats' | 'archive' | 'auth'
 
@@ -46,20 +50,29 @@ export default function App() {
   const { state, wrappedDispatch, maxScore, rank } = useGameSession(puzzle, selectedDate, user)
 
   const [voiceActive, setVoiceActive] = useState(false)
+  const micBands = useAudioLevel(voiceActive)
   const [toastKey, setToastKey] = useState(0)
   const [toastValid, setToastValid] = useState(false)
   const [toastScore, setToastScore] = useState(0)
+  const [toastMessage, setToastMessage] = useState('')
   const [showQueenBee, setShowQueenBee] = useState(false)
+  const gameColumnRef = useRef<HTMLDivElement>(null)
+
+  // Voice ticker queue
+  const [tickerWords, setTickerWords] = useState<TickerWord[]>([])
+  const [tickerActive, setTickerActive] = useState(0)
+  const tickerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const processorRef = useRef<() => void>(() => {})
 
   // Flash newly found word in the list
   const [flashWord, setFlashWord] = useState('')
   const prevFoundWordsRef = useRef<string[]>([])
   useEffect(() => {
     const prev = prevFoundWordsRef.current
-    const newWord = state.foundWords.find(w => !prev.includes(w))
+    const newWords = state.foundWords.filter(w => !prev.includes(w))
     prevFoundWordsRef.current = state.foundWords
-    if (newWord) {
-      setFlashWord(newWord)
+    if (newWords.length === 1) {
+      setFlashWord(newWords[0])
       const timer = setTimeout(() => setFlashWord(''), 800)
       return () => clearTimeout(timer)
     }
@@ -72,6 +85,7 @@ export default function App() {
     prevFoundCountRef.current = state.foundWords.length
     if (
       puzzle.answers.length > 0 &&
+      prevCount > 0 &&
       prevCount < puzzle.answers.length &&
       state.foundWords.length === puzzle.answers.length
     ) {
@@ -79,11 +93,17 @@ export default function App() {
     }
   }, [state.foundWords.length, puzzle.answers.length])
 
+  // Reset Queen Bee celebration when switching puzzle dates
+  useEffect(() => {
+    setShowQueenBee(false)
+  }, [selectedDate])
+
   function handleDispatch(action: GameAction) {
     if (action.type === 'SUBMIT_WORD') {
       const word = state.input.join('').toLowerCase()
       const result = wrappedDispatch(action)
       if (result) {
+        setToastMessage(result.message)
         setToastValid(result.valid)
         setToastScore(result.valid ? scoreWord(word, puzzle) : 0)
         setToastKey(k => k + 1)
@@ -93,11 +113,26 @@ export default function App() {
     }
   }
 
-  function handleVoiceWord(word: string): { valid: boolean; score: number; duplicate: boolean } {
+  // Validates and submits a word from the ticker (no toast — feedback shows in the bar)
+  // Fallback chain: exact → speech alternatives → homophones → suffix expansion
+  function processTickerWord(word: string, alternatives?: string[]): { status: 'valid' | 'invalid'; feedback: string } {
     const lw = word.toLowerCase()
     let result = validateWord(lw, puzzle, state.foundWords, WORDS)
     let submittedWord = lw
 
+    // Try speech recognition alternatives (API heard multiple hypotheses)
+    if (!result.valid && result.message !== 'Already found' && alternatives?.length) {
+      for (const alt of alternatives) {
+        const altResult = validateWord(alt.toLowerCase(), puzzle, state.foundWords, WORDS)
+        if (altResult.valid) {
+          result = altResult
+          submittedWord = alt.toLowerCase()
+          break
+        }
+      }
+    }
+
+    // Try phonetic homophones
     if (!result.valid && result.message === 'Bad letters') {
       for (const candidate of getHomophones(lw)) {
         const alt = validateWord(candidate, puzzle, state.foundWords, WORDS)
@@ -109,14 +144,83 @@ export default function App() {
       }
     }
 
-    const pts = result.valid ? scoreWord(submittedWord, puzzle) : 0
-    const duplicate = result.message === 'Already found'
-    setToastValid(result.valid)
-    setToastScore(pts)
-    setToastKey(k => k + 1)
-    wrappedDispatch({ type: 'SUBMIT_VOICE_WORD', word: submittedWord })
-    return { valid: result.valid, score: pts, duplicate }
+    // Suffix expansion: speech API often truncates endings ("requester" → "request")
+    if (!result.valid && result.message !== 'Already found') {
+      const suffixes = ['s', 'er', 'ers', 'es', 'ed', 'ing', 'ly', 'ness', 'ment', 'able', 'tion']
+      for (const suffix of suffixes) {
+        const extended = lw + suffix
+        const alt = validateWord(extended, puzzle, state.foundWords, WORDS)
+        if (alt.valid) {
+          result = alt
+          submittedWord = extended
+          break
+        }
+      }
+    }
+
+    if (result.valid) {
+      wrappedDispatch({ type: 'SUBMIT_VOICE_WORD', word: submittedWord })
+    }
+
+    return {
+      status: result.valid ? 'valid' : 'invalid',
+      feedback: result.message,
+    }
   }
+
+  // Beat processor — reassigned every render so it always captures fresh state
+  processorRef.current = () => {
+    if (tickerWords.length === 0) return
+
+    if (tickerActive >= tickerWords.length) {
+      // All words processed — stop timer and schedule cleanup
+      if (tickerTimerRef.current !== null) {
+        clearInterval(tickerTimerRef.current)
+        tickerTimerRef.current = null
+      }
+      setTimeout(() => {
+        setTickerWords([])
+        setTickerActive(0)
+      }, 1500)
+      return
+    }
+
+    const tw = tickerWords[tickerActive]
+    const result = processTickerWord(tw.word, tw.alternatives)
+
+    setTickerWords(prev =>
+      prev.map((w, i) =>
+        i === tickerActive ? { ...w, status: result.status, feedback: result.feedback } : w
+      )
+    )
+    setTickerActive(prev => prev + 1)
+  }
+
+  function startTickerTimer() {
+    if (tickerTimerRef.current !== null) return
+    // Process first word immediately, then continue on beat interval
+    setTimeout(() => processorRef.current(), 0)
+    tickerTimerRef.current = setInterval(() => processorRef.current(), BEAT_MS)
+  }
+
+  function addToTickerQueue(word: string, alternatives?: string[]) {
+    const newWord: TickerWord = {
+      id: `${Date.now()}-${Math.random()}`,
+      word,
+      alternatives,
+      status: 'pending',
+      feedback: '',
+    }
+    setTickerWords(prev => [...prev, newWord])
+    startTickerTimer()
+  }
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (tickerTimerRef.current !== null) clearInterval(tickerTimerRef.current)
+    }
+  }, [])
 
   return (
     <div className={styles.app}>
@@ -153,9 +257,9 @@ export default function App() {
       </header>
 
       <main className={styles.main}>
-        <div className={styles.gameColumn}>
+        <div className={styles.gameColumn} ref={gameColumnRef}>
           <div className={styles.toastWrapper}>
-            <Toast key={toastKey} message={state.message} valid={toastValid} score={toastScore} />
+            <Toast key={toastKey} message={toastMessage} valid={toastValid} score={toastScore} />
           </div>
 
           <InputDisplay input={state.input} centerLetter={puzzle.center} />
@@ -169,7 +273,7 @@ export default function App() {
           <div className={styles.controlsGroup}>
             <VoiceInput
               active={voiceActive}
-              onWord={handleVoiceWord}
+              onWord={addToTickerQueue}
               onAutoStop={() => setVoiceActive(false)}
             />
             <GameControls
@@ -180,6 +284,7 @@ export default function App() {
               onKeyLetter={(letter) => handleDispatch({ type: 'ADD_LETTER', letter })}
               onMicToggle={() => setVoiceActive(v => !v)}
               micActive={voiceActive}
+              micBands={micBands}
             />
             <button className={styles.hintsBtn} onClick={() => setModal('hints')}>
               Hints
@@ -197,6 +302,8 @@ export default function App() {
           />
         </div>
       </main>
+
+      <VoiceTicker words={tickerWords} activeIndex={tickerActive} />
     </div>
   )
 }

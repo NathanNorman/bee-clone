@@ -22,6 +22,9 @@ type InternalAction = GameAction | {
   score: number
   message: string
   timestamp: string
+} | {
+  type: '_RESET'
+  puzzle: Puzzle
 }
 
 function reducer(state: GameState, action: InternalAction): GameState {
@@ -53,6 +56,7 @@ function reducer(state: GameState, action: InternalAction): GameState {
       }
 
     case '_WORD_FOUND': {
+      if (state.foundWords.includes(action.word)) return state
       const newFoundWords = [...state.foundWords, action.word].sort()
       return {
         ...state,
@@ -69,6 +73,9 @@ function reducer(state: GameState, action: InternalAction): GameState {
       // Handled by wrappedDispatch — these cases just clear input if we somehow reach them
       return { ...state, input: [], message: state.message }
 
+    case '_RESET':
+      return makeInitialState(action.puzzle)
+
     default:
       return state
   }
@@ -83,6 +90,15 @@ export default function useGameSession(
   const puzzleRef = useRef(puzzle)
   puzzleRef.current = puzzle
 
+  // Reset game state when the date changes
+  const prevDateRef = useRef(dateStr)
+  useEffect(() => {
+    if (prevDateRef.current !== dateStr) {
+      prevDateRef.current = dateStr
+      dispatch({ type: '_RESET', puzzle } as InternalAction)
+    }
+  }, [dateStr, puzzle])
+
   const maxScore = useMemo(
     () => puzzle.answers.reduce((sum, w) => sum + scoreWord(w, puzzle), 0),
     [puzzle]
@@ -94,6 +110,8 @@ export default function useGameSession(
   useEffect(() => {
     if (!user) return
 
+    let cancelled = false
+
     supabase
       .from('game_sessions')
       .select('found_words, word_timestamps, score')
@@ -101,6 +119,7 @@ export default function useGameSession(
       .eq('user_id', user.id)
       .maybeSingle()
       .then(({ data }) => {
+        if (cancelled) return
         if (data && data.found_words.length > 0) {
           dispatch({
             type: 'HYDRATE',
@@ -110,6 +129,8 @@ export default function useGameSession(
           })
         }
       })
+
+    return () => { cancelled = true }
   }, [dateStr, user?.id])
 
   // Debounced sync to Supabase after state changes
