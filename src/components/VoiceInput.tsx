@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { WORDS } from '../data/words'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SpeechRecognitionAPI: any =
@@ -167,13 +168,18 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
           const confidence = (e.results[i][0].confidence * 100).toFixed(0)
           const altInfo = alternatives ? ` alts=${JSON.stringify(alternatives)}` : ''
           console.log(`${ts()} [CONT] FINAL   raw="${raw}" → words=${JSON.stringify(words)} confidence=${confidence}%${altInfo}`)
-          // Submit all words in order from final result — preserves natural speech order
+          // Submit all final words — safety net for anything interim missed
           for (const w of words) {
             submitWord(w, alternatives)
           }
+        } else {
+          // Interim: submit dictionary words immediately for snappy feedback
+          for (const w of words) {
+            if (WORDS.has(w)) {
+              submitWord(w, alternatives)
+            }
+          }
         }
-        // Interim results are not submitted — waiting for final preserves word order
-        // and avoids submitting noise from the speech API's evolving hypotheses
       }
     }
     rec.onend = () => {
