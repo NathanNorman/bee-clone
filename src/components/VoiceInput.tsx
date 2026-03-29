@@ -8,27 +8,42 @@ const SpeechRecognitionAPI: any =
     : null
 
 const INACTIVITY_MS = 60_000
+// If no result event fires within this window after starting, force a restart
+const HEALTH_CHECK_MS = 5_000
+// Base delay before restarting after onend — grows with exponential backoff
+const RESTART_DELAY_MS = 250
+// Max backoff delay on rapid consecutive failures
+const MAX_BACKOFF_MS = 5_000
+
+// Fatal errors that should stop the restart loop entirely
+const FATAL_ERRORS = new Set(['not-allowed', 'audio-capture', 'service-not-available', 'language-not-supported'])
 
 interface VoiceInputProps {
   active: boolean
   onWord: (word: string, alternatives?: string[]) => void
   onAutoStop: () => void
+  onError?: (error: string) => void
 }
 
-export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputProps) {
+export default function VoiceInput({ active, onWord, onAutoStop, onError }: VoiceInputProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null)
   const continuousActiveRef = useRef(false)
   const pendingTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastResultTimeRef = useRef<number>(0)
+  const consecutiveFailuresRef = useRef(0)
   const onWordRef = useRef(onWord)
   const onAutoStopRef = useRef(onAutoStop)
+  const onErrorRef = useRef(onError)
   // Per result index, tracks which words we've already submitted.
   // Interim words only go through if they're real English words (in WORDS).
   // Final results submit anything not yet sent for that result, as a safety net.
   const sentPerResult = useRef(new Map<number, Set<string>>())
   useEffect(() => { onWordRef.current = onWord }, [onWord])
   useEffect(() => { onAutoStopRef.current = onAutoStop }, [onAutoStop])
+  useEffect(() => { onErrorRef.current = onError }, [onError])
 
   function ts(): string {
     const d = new Date()
@@ -55,6 +70,38 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
     }
   }
 
+  function startHealthCheck() {
+    clearHealthCheck()
+    healthTimerRef.current = setTimeout(() => {
+      if (!continuousActiveRef.current) return
+      const elapsed = Date.now() - lastResultTimeRef.current
+      if (elapsed >= HEALTH_CHECK_MS) {
+        console.log(`${ts()} [CONT] health check: no results for ${(elapsed / 1000).toFixed(1)}s, forcing restart`)
+        forceRestart()
+      }
+    }, HEALTH_CHECK_MS)
+  }
+
+  function clearHealthCheck() {
+    if (healthTimerRef.current) {
+      clearTimeout(healthTimerRef.current)
+      healthTimerRef.current = null
+    }
+  }
+
+  function forceRestart() {
+    if (!continuousActiveRef.current) return
+    try { recognitionRef.current?.stop() } catch (_) { /* ignore */ }
+    recognitionRef.current = null
+    startContinuous()
+  }
+
+  function getBackoffDelay(): number {
+    const failures = consecutiveFailuresRef.current
+    if (failures <= 1) return RESTART_DELAY_MS
+    return Math.min(RESTART_DELAY_MS * Math.pow(2, failures - 1), MAX_BACKOFF_MS)
+  }
+
   function submitWord(resultIdx: number, word: string, alternatives?: string[]) {
     let sent = sentPerResult.current.get(resultIdx)
     if (!sent) {
@@ -74,8 +121,18 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
     rec.interimResults = true
     rec.continuous = true
     rec.maxAlternatives = 5
+
+    // Try Chrome's on-device recognition if available
+    if ('processLocally' in rec) {
+      rec.processLocally = true
+      console.log(`${ts()} [CONT] using on-device recognition`)
+    }
+
     rec.onresult = (e: any) => {
+      lastResultTimeRef.current = Date.now()
+      consecutiveFailuresRef.current = 0
       resetInactivityTimer()
+      startHealthCheck()
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const raw = e.results[i][0].transcript
         const words = raw.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -113,38 +170,75 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
     }
     rec.onend = () => {
       if (continuousActiveRef.current) {
-        console.log(`${ts()} [CONT] restarting after onend`)
-        setTimeout(() => {
+        consecutiveFailuresRef.current++
+        const delay = getBackoffDelay()
+        console.log(`${ts()} [CONT] onend — restart #${consecutiveFailuresRef.current} in ${delay}ms`)
+        // Always create a fresh instance — reusing stopped instances is unreliable
+        recognitionRef.current = null
+        const t = setTimeout(() => {
           if (!continuousActiveRef.current) return
-          try {
-            rec.start()
-          } catch (_) {
-            // Same instance restart failed — create fresh recognition
-            console.log(`${ts()} [CONT] restart failed, creating fresh instance`)
-            recognitionRef.current = null
-            startContinuous()
-          }
-        }, 50)
+          startContinuous()
+        }, delay)
+        pendingTimeoutsRef.current.push(t)
       } else {
         console.log(`${ts()} [CONT] ended`)
       }
     }
     rec.onerror = (e: any) => {
-      console.warn(`${ts()} [CONT] error: ${e.error}`)
+      const error = e.error as string
+      console.warn(`${ts()} [CONT] error: ${error}`)
+
+      if (FATAL_ERRORS.has(error)) {
+        console.error(`${ts()} [CONT] fatal error "${error}" — stopping voice input`)
+        continuousActiveRef.current = false
+        recognitionRef.current = null
+        clearHealthCheck()
+        clearInactivityTimer()
+
+        const messages: Record<string, string> = {
+          'not-allowed': 'Microphone permission denied',
+          'audio-capture': 'No microphone found',
+          'service-not-available': 'Speech service unavailable',
+          'language-not-supported': 'Language not supported',
+        }
+        onErrorRef.current?.(messages[error] ?? error)
+        onAutoStopRef.current()
+      }
+      // no-speech and aborted are normal in continuous mode — onend handles restart
     }
     recognitionRef.current = rec
     try {
       rec.start()
+      lastResultTimeRef.current = Date.now()
       console.log(`${ts()} [CONT] recognition started`)
       resetInactivityTimer()
+      startHealthCheck()
     } catch (err) {
       console.error(`${ts()} [CONT] failed to start:`, err)
     }
   }
 
+  // Restart recognition when user returns to the tab
+  useEffect(() => {
+    if (!active) return
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible' && continuousActiveRef.current) {
+        console.log(`${ts()} [CONT] tab visible again, forcing restart`)
+        consecutiveFailuresRef.current = 0
+        forceRestart()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
+
   useEffect(() => {
     if (active) {
       continuousActiveRef.current = true
+      consecutiveFailuresRef.current = 0
       startContinuous()
     } else {
       continuousActiveRef.current = false
@@ -152,6 +246,7 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
       recognitionRef.current = null
       clearPendingTimeouts()
       clearInactivityTimer()
+      clearHealthCheck()
       sentPerResult.current.clear()
     }
     return () => {
@@ -159,6 +254,7 @@ export default function VoiceInput({ active, onWord, onAutoStop }: VoiceInputPro
       recognitionRef.current?.stop()
       clearPendingTimeouts()
       clearInactivityTimer()
+      clearHealthCheck()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])

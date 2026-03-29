@@ -44,6 +44,7 @@ export default function GameControls({
         return
       }
       if (e.key === 'Enter') {
+        e.preventDefault() // prevent double-fire when Enter button is focused
         onSubmitRef.current()
         return
       }

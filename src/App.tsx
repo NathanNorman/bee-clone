@@ -19,6 +19,7 @@ import QueenBeeCelebration from './components/QueenBeeCelebration'
 import { validateWord } from './lib/validateWord'
 import { scoreWord } from './lib/scoring'
 import { getHomophones } from './lib/homophones'
+import { closestWord } from './lib/fuzzyMatch'
 import { WORDS } from './data/words'
 import type { GameAction, TickerWord } from './types'
 import styles from './App.module.css'
@@ -100,6 +101,7 @@ export default function App() {
 
   function handleDispatch(action: GameAction) {
     if (action.type === 'SUBMIT_WORD') {
+      if (state.input.length === 0) return
       const word = state.input.join('').toLowerCase()
       const result = wrappedDispatch(action)
       if (result) {
@@ -154,6 +156,18 @@ export default function App() {
           result = alt
           submittedWord = extended
           break
+        }
+      }
+    }
+
+    // Fuzzy match: find closest valid word by edit distance (catches minor mishearings)
+    if (!result.valid && result.message !== 'Already found' && lw.length >= 4) {
+      const match = closestWord(lw, puzzle.answers)
+      if (match) {
+        const alt = validateWord(match, puzzle, state.foundWords, WORDS)
+        if (alt.valid) {
+          result = alt
+          submittedWord = match
         }
       }
     }
@@ -275,6 +289,12 @@ export default function App() {
               active={voiceActive}
               onWord={addToTickerQueue}
               onAutoStop={() => setVoiceActive(false)}
+              onError={(msg) => {
+                setToastMessage(msg)
+                setToastValid(false)
+                setToastScore(0)
+                setToastKey(k => k + 1)
+              }}
             />
             <GameControls
               puzzle={puzzle}
