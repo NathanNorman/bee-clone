@@ -184,14 +184,14 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     }
     rec.onend = () => {
       // Ignore if this is a stale instance (forceRestart already created a new one)
-      if (gen !== generationRef.current) {
-        console.log(`${ts()} [CONT] stale onend (gen ${gen} vs ${generationRef.current}), skipping`)
-        return
-      }
+      if (gen !== generationRef.current) return // stale instance, skip
       if (continuousActiveRef.current) {
         consecutiveFailuresRef.current++
         const delay = getBackoffDelay()
-        console.log(`${ts()} [CONT] onend — restart #${consecutiveFailuresRef.current} in ${delay}ms`)
+        // Only log restarts with significant backoff to reduce noise
+        if (delay > RESTART_DELAY_MS) {
+          console.log(`${ts()} [CONT] onend — restart #${consecutiveFailuresRef.current} in ${delay}ms`)
+        }
         recognitionRef.current = null
         const t = setTimeout(() => {
           if (!continuousActiveRef.current) return
@@ -205,7 +205,10 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     }
     rec.onerror = (e: any) => {
       const error = e.error as string
-      console.warn(`${ts()} [CONT] error: ${error}`)
+      // no-speech and aborted are normal in continuous mode — don't spam the console
+      if (error !== 'no-speech' && error !== 'aborted') {
+        console.warn(`${ts()} [CONT] error: ${error}`)
+      }
 
       // On-device recognition doesn't have the language pack — fall back to server-based
       // Delay the restart to let Chrome fully clean up the on-device instance
