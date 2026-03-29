@@ -46,10 +46,19 @@ checkOnDeviceAvailability()
 export async function installOnDeviceSpeech(): Promise<boolean> {
   if (!SpeechRecognitionAPI || typeof SpeechRecognitionAPI.install !== 'function') return false
   try {
+    console.log('[CONT] Installing on-device speech model...')
     await SpeechRecognitionAPI.install({ langs: ['en-US'], processLocally: true })
-    onDeviceStatus = 'available'
-    return true
-  } catch {
+    // Verify the install actually worked
+    const status = await SpeechRecognitionAPI.available({ langs: ['en-US'], processLocally: true })
+    console.log(`[CONT] Post-install status: ${status}`)
+    if (status === 'available') {
+      onDeviceStatus = 'available'
+      return true
+    }
+    console.warn(`[CONT] Install completed but status is "${status}", not "available"`)
+    return false
+  } catch (err) {
+    console.error('[CONT] On-device install failed:', err)
     return false
   }
 }
@@ -178,6 +187,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError, onInst
     // If downloadable but not installed, notify the user once.
     if (onDeviceStatus === 'available') {
       rec.processLocally = true
+      console.log(`${ts()} [CONT] using on-device recognition`)
     } else if (onDeviceStatus === 'downloadable') {
       onInstallPromptRef.current?.()
     }
