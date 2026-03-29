@@ -21,14 +21,50 @@ const MAX_BACKOFF_MS = 5_000
 // Fatal errors that should stop the restart loop entirely
 const FATAL_ERRORS = new Set(['not-allowed', 'audio-capture', 'service-not-available'])
 
+// Check on-device availability once at module load (not per-instance)
+let onDeviceStatus: 'unknown' | 'checking' | 'available' | 'downloadable' | 'unavailable' = 'unknown'
+
+async function checkOnDeviceAvailability() {
+  if (onDeviceStatus !== 'unknown' || !SpeechRecognitionAPI) return
+  if (typeof SpeechRecognitionAPI.available !== 'function') {
+    onDeviceStatus = 'unavailable'
+    return
+  }
+  onDeviceStatus = 'checking'
+  try {
+    const status = await SpeechRecognitionAPI.available({ langs: ['en-US'], processLocally: true })
+    onDeviceStatus = status === 'available' ? 'available' : status === 'downloadable' ? 'downloadable' : 'unavailable'
+    console.log(`[CONT] on-device speech: ${onDeviceStatus}`)
+  } catch {
+    onDeviceStatus = 'unavailable'
+  }
+}
+
+// Fire-and-forget at load time
+checkOnDeviceAvailability()
+
+export async function installOnDeviceSpeech(): Promise<boolean> {
+  if (!SpeechRecognitionAPI || typeof SpeechRecognitionAPI.install !== 'function') return false
+  try {
+    await SpeechRecognitionAPI.install({ langs: ['en-US'], processLocally: true })
+    onDeviceStatus = 'available'
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function getOnDeviceStatus() { return onDeviceStatus }
+
 interface VoiceInputProps {
   active: boolean
   onWord: (word: string, alternatives?: string[]) => void
   onAutoStop: () => void
   onError?: (error: string) => void
+  onInstallPrompt?: () => void
 }
 
-export default function VoiceInput({ active, onWord, onAutoStop, onError }: VoiceInputProps) {
+export default function VoiceInput({ active, onWord, onAutoStop, onError, onInstallPrompt }: VoiceInputProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null)
   const continuousActiveRef = useRef(false)
@@ -43,6 +79,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
   const onWordRef = useRef(onWord)
   const onAutoStopRef = useRef(onAutoStop)
   const onErrorRef = useRef(onError)
+  const onInstallPromptRef = useRef(onInstallPrompt)
   // Global dedup: tracks all words submitted across result indices within a session.
   // Prevents the same word from being submitted twice when Chrome fires overlapping
   // result events (e.g., same word appears in result index 0 and 1).
@@ -50,6 +87,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
   useEffect(() => { onWordRef.current = onWord }, [onWord])
   useEffect(() => { onAutoStopRef.current = onAutoStop }, [onAutoStop])
   useEffect(() => { onErrorRef.current = onError }, [onError])
+  useEffect(() => { onInstallPromptRef.current = onInstallPrompt }, [onInstallPrompt])
 
   function ts(): string {
     const d = new Date()
@@ -136,9 +174,13 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     rec.continuous = true
     rec.maxAlternatives = 5
 
-    // On-device recognition (processLocally) is disabled — it requires a language
-    // pack most users don't have, and the failed attempt + cleanup interferes with
-    // the server-based fallback for several seconds.
+    // Use on-device recognition if the language pack is installed (checked at load time).
+    // If downloadable but not installed, notify the user once.
+    if (onDeviceStatus === 'available') {
+      rec.processLocally = true
+    } else if (onDeviceStatus === 'downloadable') {
+      onInstallPromptRef.current?.()
+    }
 
     rec.onresult = (e: any) => {
       lastResultTimeRef.current = Date.now()

@@ -307,6 +307,14 @@ export default function App() {
                 setToastScore(0)
                 setToastKey(k => k + 1)
               }}
+              onInstallPrompt={() => {
+                if (localStorage.getItem('on-device-speech-prompted')) return
+                localStorage.setItem('on-device-speech-prompted', '1')
+                setToastMessage('Faster voice available — tap to install')
+                setToastValid(true)
+                setToastScore(0)
+                setToastKey(k => k + 1)
+              }}
             />
             <GameControls
               puzzle={puzzle}
