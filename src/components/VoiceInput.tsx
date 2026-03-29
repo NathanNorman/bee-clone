@@ -38,6 +38,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
   const lastResultTimeRef = useRef<number>(0)
   const hasSpeechRef = useRef(false) // health check only activates after first speech
   const consecutiveFailuresRef = useRef(0)
+  const lastErrorRef = useRef<string | null>(null)
   const generationRef = useRef(0) // prevents stale onend from double-restarting
   const useLocalRef = useRef(true) // try on-device first, disable on failure
   const onWordRef = useRef(onWord)
@@ -146,6 +147,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
       lastResultTimeRef.current = Date.now()
       hasSpeechRef.current = true
       consecutiveFailuresRef.current = 0
+      lastErrorRef.current = null
       resetInactivityTimer()
       startHealthCheck()
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -186,16 +188,18 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
       // Ignore if this is a stale instance (forceRestart already created a new one)
       if (gen !== generationRef.current) return // stale instance, skip
       if (continuousActiveRef.current) {
-        consecutiveFailuresRef.current++
-        const delay = getBackoffDelay()
-        // Only log restarts with significant backoff to reduce noise
-        if (delay > RESTART_DELAY_MS) {
-          console.log(`${ts()} [CONT] onend — restart #${consecutiveFailuresRef.current} in ${delay}ms`)
+        // Only back off for no-speech (Chrome genuinely heard nothing).
+        // aborted is transient — retry quickly to minimize gaps in listening.
+        const wasAborted = lastErrorRef.current === 'aborted'
+        lastErrorRef.current = null
+        if (!wasAborted) {
+          consecutiveFailuresRef.current++
         }
+        const delay = wasAborted ? RESTART_DELAY_MS : getBackoffDelay()
         recognitionRef.current = null
         const t = setTimeout(() => {
           if (!continuousActiveRef.current) return
-          if (gen !== generationRef.current) return // double-check
+          if (gen !== generationRef.current) return
           startContinuous()
         }, delay)
         pendingTimeoutsRef.current.push(t)
@@ -205,6 +209,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     }
     rec.onerror = (e: any) => {
       const error = e.error as string
+      lastErrorRef.current = error
       // no-speech and aborted are normal in continuous mode — don't spam the console
       if (error !== 'no-speech' && error !== 'aborted') {
         console.warn(`${ts()} [CONT] error: ${error}`)
