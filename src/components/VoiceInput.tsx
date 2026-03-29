@@ -11,7 +11,7 @@ const INACTIVITY_MS = 60_000
 // If no result event fires within this window after starting, force a restart
 const HEALTH_CHECK_MS = 5_000
 // Base delay before restarting after onend — grows with exponential backoff
-const RESTART_DELAY_MS = 250
+const RESTART_DELAY_MS = 300
 // Max backoff delay on rapid consecutive failures
 const MAX_BACKOFF_MS = 5_000
 
@@ -34,14 +34,15 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
   const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastResultTimeRef = useRef<number>(0)
   const consecutiveFailuresRef = useRef(0)
+  const generationRef = useRef(0) // prevents stale onend from double-restarting
   const useLocalRef = useRef(true) // try on-device first, disable on failure
   const onWordRef = useRef(onWord)
   const onAutoStopRef = useRef(onAutoStop)
   const onErrorRef = useRef(onError)
-  // Per result index, tracks which words we've already submitted.
-  // Interim words only go through if they're real English words (in WORDS).
-  // Final results submit anything not yet sent for that result, as a safety net.
-  const sentPerResult = useRef(new Map<number, Set<string>>())
+  // Global dedup: tracks all words submitted across result indices within a session.
+  // Prevents the same word from being submitted twice when Chrome fires overlapping
+  // result events (e.g., same word appears in result index 0 and 1).
+  const submittedWordsRef = useRef(new Set<string>())
   useEffect(() => { onWordRef.current = onWord }, [onWord])
   useEffect(() => { onAutoStopRef.current = onAutoStop }, [onAutoStop])
   useEffect(() => { onErrorRef.current = onError }, [onError])
@@ -92,8 +93,12 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
 
   function forceRestart() {
     if (!continuousActiveRef.current) return
+    // Bump generation so the old instance's onend is ignored
+    generationRef.current++
+    clearPendingTimeouts()
     try { recognitionRef.current?.stop() } catch (_) { /* ignore */ }
     recognitionRef.current = null
+    consecutiveFailuresRef.current = 0
     startContinuous()
   }
 
@@ -103,20 +108,16 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     return Math.min(RESTART_DELAY_MS * Math.pow(2, failures - 1), MAX_BACKOFF_MS)
   }
 
-  function submitWord(resultIdx: number, word: string, alternatives?: string[]) {
-    let sent = sentPerResult.current.get(resultIdx)
-    if (!sent) {
-      sent = new Set()
-      sentPerResult.current.set(resultIdx, sent)
-    }
-    if (sent.has(word)) return
-    sent.add(word)
-    console.log(`${ts()} [CONT] submitting[${resultIdx}]: "${word}"${alternatives?.length ? ` alts=[${alternatives.join(',')}]` : ''}`)
+  function submitWord(word: string, alternatives?: string[]) {
+    if (submittedWordsRef.current.has(word)) return
+    submittedWordsRef.current.add(word)
+    console.log(`${ts()} [CONT] submitting: "${word}"${alternatives?.length ? ` alts=[${alternatives.join(',')}]` : ''}`)
     onWordRef.current(word, alternatives)
   }
 
   function startContinuous() {
     if (!SpeechRecognitionAPI) return
+    const gen = ++generationRef.current
     const rec = new SpeechRecognitionAPI()
     rec.lang = 'en-US'
     rec.interimResults = true
@@ -154,30 +155,33 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
           const confidence = (e.results[i][0].confidence * 100).toFixed(0)
           const altInfo = alternatives ? ` alts=${JSON.stringify(alternatives)}` : ''
           console.log(`${ts()} [CONT] FINAL   raw="${raw}" → words=${JSON.stringify(words)} confidence=${confidence}%${altInfo}`)
-          // Submit all final words — safety net for anything interim missed
           for (const w of words) {
-            submitWord(i, w, alternatives)
+            submitWord(w, alternatives)
           }
-          sentPerResult.current.delete(i)
         } else {
           // Interim: only submit words that exist in the dictionary
           for (const w of words) {
             if (WORDS.has(w)) {
-              submitWord(i, w, alternatives)
+              submitWord(w, alternatives)
             }
           }
         }
       }
     }
     rec.onend = () => {
+      // Ignore if this is a stale instance (forceRestart already created a new one)
+      if (gen !== generationRef.current) {
+        console.log(`${ts()} [CONT] stale onend (gen ${gen} vs ${generationRef.current}), skipping`)
+        return
+      }
       if (continuousActiveRef.current) {
         consecutiveFailuresRef.current++
         const delay = getBackoffDelay()
         console.log(`${ts()} [CONT] onend — restart #${consecutiveFailuresRef.current} in ${delay}ms`)
-        // Always create a fresh instance — reusing stopped instances is unreliable
         recognitionRef.current = null
         const t = setTimeout(() => {
           if (!continuousActiveRef.current) return
+          if (gen !== generationRef.current) return // double-check
           startContinuous()
         }, delay)
         pendingTimeoutsRef.current.push(t)
@@ -193,6 +197,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
       if (error === 'language-not-supported' && useLocalRef.current) {
         console.log(`${ts()} [CONT] on-device not available for en-US, falling back to server-based`)
         useLocalRef.current = false
+        generationRef.current++ // invalidate this instance's onend
         recognitionRef.current = null
         startContinuous()
         return
@@ -201,6 +206,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
       if (FATAL_ERRORS.has(error)) {
         console.error(`${ts()} [CONT] fatal error "${error}" — stopping voice input`)
         continuousActiveRef.current = false
+        generationRef.current++
         recognitionRef.current = null
         clearHealthCheck()
         clearInactivityTimer()
@@ -235,7 +241,6 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     function handleVisibilityChange() {
       if (document.visibilityState === 'visible' && continuousActiveRef.current) {
         console.log(`${ts()} [CONT] tab visible again, forcing restart`)
-        consecutiveFailuresRef.current = 0
         forceRestart()
       }
     }
@@ -249,18 +254,22 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     if (active) {
       continuousActiveRef.current = true
       consecutiveFailuresRef.current = 0
+      generationRef.current = 0
+      submittedWordsRef.current.clear()
       startContinuous()
     } else {
       continuousActiveRef.current = false
+      generationRef.current++
       recognitionRef.current?.stop()
       recognitionRef.current = null
       clearPendingTimeouts()
       clearInactivityTimer()
       clearHealthCheck()
-      sentPerResult.current.clear()
+      submittedWordsRef.current.clear()
     }
     return () => {
       continuousActiveRef.current = false
+      generationRef.current++
       recognitionRef.current?.stop()
       clearPendingTimeouts()
       clearInactivityTimer()
