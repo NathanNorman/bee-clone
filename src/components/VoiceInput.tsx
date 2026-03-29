@@ -19,7 +19,7 @@ const RESTART_DELAY_MS = 300
 const MAX_BACKOFF_MS = 5_000
 
 // Fatal errors that should stop the restart loop entirely
-const FATAL_ERRORS = new Set(['not-allowed', 'audio-capture', 'service-not-available', 'language-not-supported'])
+const FATAL_ERRORS = new Set(['not-allowed', 'audio-capture', 'service-not-available'])
 
 interface VoiceInputProps {
   active: boolean
@@ -40,7 +40,6 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
   const consecutiveFailuresRef = useRef(0)
   const lastErrorRef = useRef<string | null>(null)
   const generationRef = useRef(0) // prevents stale onend from double-restarting
-  const useLocalRef = useRef(true) // try on-device first, disable on failure
   const onWordRef = useRef(onWord)
   const onAutoStopRef = useRef(onAutoStop)
   const onErrorRef = useRef(onError)
@@ -137,11 +136,9 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     rec.continuous = true
     rec.maxAlternatives = 5
 
-    // Try Chrome's on-device recognition if available and not previously failed
-    if (useLocalRef.current && 'processLocally' in rec) {
-      rec.processLocally = true
-      console.log(`${ts()} [CONT] using on-device recognition`)
-    }
+    // On-device recognition (processLocally) is disabled — it requires a language
+    // pack most users don't have, and the failed attempt + cleanup interferes with
+    // the server-based fallback for several seconds.
 
     rec.onresult = (e: any) => {
       lastResultTimeRef.current = Date.now()
@@ -215,21 +212,6 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
         console.warn(`${ts()} [CONT] error: ${error}`)
       }
 
-      // On-device recognition doesn't have the language pack — fall back to server-based
-      // Delay the restart to let Chrome fully clean up the on-device instance
-      if (error === 'language-not-supported' && useLocalRef.current) {
-        console.log(`${ts()} [CONT] on-device not available for en-US, falling back to server-based`)
-        useLocalRef.current = false
-        generationRef.current++
-        consecutiveFailuresRef.current = 0
-        recognitionRef.current = null
-        const t = setTimeout(() => {
-          if (!continuousActiveRef.current) return
-          startContinuous()
-        }, 500)
-        pendingTimeoutsRef.current.push(t)
-        return
-      }
 
       if (FATAL_ERRORS.has(error)) {
         console.error(`${ts()} [CONT] fatal error "${error}" — stopping voice input`)
@@ -243,7 +225,6 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
           'not-allowed': 'Microphone permission denied',
           'audio-capture': 'No microphone found',
           'service-not-available': 'Speech service unavailable',
-          'language-not-supported': 'Language not supported',
         }
         onErrorRef.current?.(messages[error] ?? error)
         onAutoStopRef.current()
