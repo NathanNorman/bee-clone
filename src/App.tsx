@@ -9,7 +9,7 @@ import GameControls from './components/GameControls'
 import ScoreDisplay from './components/ScoreDisplay'
 import FoundWordsList from './components/FoundWordsList'
 import Toast from './components/Toast'
-import VoiceInput from './components/VoiceInput'
+import VoiceInput, { installOnDeviceSpeech } from './components/VoiceInput'
 import { VoiceTicker } from './components/VoiceTicker'
 import AuthPrompt from './components/AuthPrompt'
 import HintsPanel from './components/HintsPanel'
@@ -62,6 +62,8 @@ export default function App() {
   const [toastScore, setToastScore] = useState(0)
   const [toastMessage, setToastMessage] = useState('')
   const [showQueenBee, setShowQueenBee] = useState(false)
+  const [showInstallBanner, setShowInstallBanner] = useState(false)
+  const [installing, setInstalling] = useState(false)
   const gameColumnRef = useRef<HTMLDivElement>(null)
 
   // Voice ticker queue
@@ -308,12 +310,9 @@ export default function App() {
                 setToastKey(k => k + 1)
               }}
               onInstallPrompt={() => {
-                if (localStorage.getItem('on-device-speech-prompted')) return
-                localStorage.setItem('on-device-speech-prompted', '1')
-                setToastMessage('Faster voice available — tap to install')
-                setToastValid(true)
-                setToastScore(0)
-                setToastKey(k => k + 1)
+                if (!localStorage.getItem('on-device-speech-dismissed')) {
+                  setShowInstallBanner(true)
+                }
               }}
             />
             <GameControls
@@ -329,6 +328,41 @@ export default function App() {
             <button className={styles.hintsBtn} onClick={() => setModal('hints')}>
               Hints
             </button>
+            {showInstallBanner && (
+              <div className={styles.installBanner}>
+                <span>Faster offline voice available</span>
+                <button
+                  className={styles.installBtn}
+                  disabled={installing}
+                  onClick={async () => {
+                    setInstalling(true)
+                    const ok = await installOnDeviceSpeech()
+                    setInstalling(false)
+                    setShowInstallBanner(false)
+                    if (ok) {
+                      setToastMessage('Voice model installed!')
+                      setToastValid(true)
+                    } else {
+                      setToastMessage('Install failed')
+                      setToastValid(false)
+                    }
+                    setToastScore(0)
+                    setToastKey(k => k + 1)
+                  }}
+                >
+                  {installing ? 'Installing…' : 'Install'}
+                </button>
+                <button
+                  className={styles.installDismiss}
+                  onClick={() => {
+                    setShowInstallBanner(false)
+                    localStorage.setItem('on-device-speech-dismissed', '1')
+                  }}
+                >
+                  &#x2715;
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

@@ -94,6 +94,46 @@
 
 .hintsBtn:hover { background: #fffbeb; border-color: #f7c835; }
 
+.installBanner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #f0f7ff;
+  border: 1px solid #b3d4fc;
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  color: #1a3a5c;
+  width: 100%;
+  max-width: 320px;
+}
+
+.installBanner span { flex: 1; }
+
+.installBtn {
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.installBtn:hover { background: #1d4ed8; }
+.installBtn:disabled { opacity: 0.6; cursor: default; }
+
+.installDismiss {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 0.2rem;
+}
+
 .sideColumn {
   display: flex;
   flex-direction: column;
