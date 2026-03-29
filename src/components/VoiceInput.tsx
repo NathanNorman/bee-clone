@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { WORDS } from '../data/words'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SpeechRecognitionAPI: any =
@@ -8,8 +7,11 @@ const SpeechRecognitionAPI: any =
     : null
 
 const INACTIVITY_MS = 60_000
-// If no result event fires within this window after starting, force a restart
-const HEALTH_CHECK_MS = 5_000
+// If no result event fires within this window after recent speech, force a restart.
+// Only activates after speech has been detected — prevents pointless restarts during silence.
+const HEALTH_CHECK_MS = 8_000
+// Health check stops forcing restarts if silence exceeds this (inactivity timer handles it)
+const HEALTH_CHECK_WINDOW_MS = 30_000
 // Base delay before restarting after onend — grows with exponential backoff
 const RESTART_DELAY_MS = 300
 // Max backoff delay on rapid consecutive failures
@@ -33,6 +35,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastResultTimeRef = useRef<number>(0)
+  const hasSpeechRef = useRef(false) // health check only activates after first speech
   const consecutiveFailuresRef = useRef(0)
   const generationRef = useRef(0) // prevents stale onend from double-restarting
   const useLocalRef = useRef(true) // try on-device first, disable on failure
@@ -76,7 +79,15 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     clearHealthCheck()
     healthTimerRef.current = setTimeout(() => {
       if (!continuousActiveRef.current) return
+      // Only force-restart if speech was recently detected (zombie detection).
+      // During prolonged silence, let the inactivity timer handle shutdown.
+      if (!hasSpeechRef.current) return
       const elapsed = Date.now() - lastResultTimeRef.current
+      if (elapsed >= HEALTH_CHECK_WINDOW_MS) {
+        // Too long since last speech — stop health-checking, let inactivity timer take over
+        console.log(`${ts()} [CONT] health check: silence for ${(elapsed / 1000).toFixed(0)}s, deferring to inactivity timer`)
+        return
+      }
       if (elapsed >= HEALTH_CHECK_MS) {
         console.log(`${ts()} [CONT] health check: no results for ${(elapsed / 1000).toFixed(1)}s, forcing restart`)
         forceRestart()
@@ -132,6 +143,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
 
     rec.onresult = (e: any) => {
       lastResultTimeRef.current = Date.now()
+      hasSpeechRef.current = true
       consecutiveFailuresRef.current = 0
       resetInactivityTimer()
       startHealthCheck()
@@ -155,17 +167,13 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
           const confidence = (e.results[i][0].confidence * 100).toFixed(0)
           const altInfo = alternatives ? ` alts=${JSON.stringify(alternatives)}` : ''
           console.log(`${ts()} [CONT] FINAL   raw="${raw}" → words=${JSON.stringify(words)} confidence=${confidence}%${altInfo}`)
+          // Submit all words in order from final result — preserves natural speech order
           for (const w of words) {
             submitWord(w, alternatives)
           }
-        } else {
-          // Interim: only submit words that exist in the dictionary
-          for (const w of words) {
-            if (WORDS.has(w)) {
-              submitWord(w, alternatives)
-            }
-          }
         }
+        // Interim results are not submitted — waiting for final preserves word order
+        // and avoids submitting noise from the speech API's evolving hypotheses
       }
     }
     rec.onend = () => {
@@ -255,6 +263,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
       continuousActiveRef.current = true
       consecutiveFailuresRef.current = 0
       generationRef.current = 0
+      hasSpeechRef.current = false
       submittedWordsRef.current.clear()
       startContinuous()
     } else {
