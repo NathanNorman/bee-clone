@@ -40,11 +40,15 @@ export default function App() {
 
   const [modal, setModal] = useState<Modal>('none')
   useEffect(() => {
+    // Don't prompt if: user previously dismissed, already signed in before,
+    // or there's a stored Supabase session (token refresh may still be in flight)
+    const hasStoredSession = !!localStorage.getItem('sb-obvavweyhuyesyhqbdzc-auth-token')
     if (
       authState.status === 'unauthenticated' &&
-      !localStorage.getItem('auth-prompt-dismissed')
+      !localStorage.getItem('auth-prompt-dismissed') &&
+      !hasStoredSession
     ) {
-      const t = setTimeout(() => setModal('auth'), 1000)
+      const t = setTimeout(() => setModal('auth'), 1500)
       return () => clearTimeout(t)
     }
   }, [authState.status])
