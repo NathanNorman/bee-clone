@@ -166,8 +166,12 @@ export default function App() {
     }
 
     // Fuzzy match: find closest valid word by edit distance (catches minor mishearings)
-    if (!result.valid && result.message !== 'Already found' && lw.length >= 4) {
-      const match = closestWord(lw, puzzle.answers)
+    // Only for words that already contain the center letter and are long enough
+    // to avoid false matches (e.g., "char" → "chary")
+    const centerLower = puzzle.center.toLowerCase()
+    if (!result.valid && result.message !== 'Already found' && lw.length >= 5 && lw.includes(centerLower)) {
+      const maxDist = lw.length >= 7 ? 2 : 1
+      const match = closestWord(lw, puzzle.answers, maxDist)
       if (match) {
         const alt = validateWord(match, puzzle, state.foundWords, WORDS)
         if (alt.valid) {
