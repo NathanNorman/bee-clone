@@ -11,14 +11,9 @@ export default function useAuth() {
   const [authState, setAuthState] = useState<AuthState>({ status: 'loading' })
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setAuthState({ status: 'authenticated', user: session.user })
-      } else {
-        setAuthState({ status: 'unauthenticated' })
-      }
-    })
-
+    // onAuthStateChange fires INITIAL_SESSION on setup, then TOKEN_REFRESHED
+    // automatically — no need for a separate getSession() call which can
+    // return stale data before the refresh completes.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setAuthState({ status: 'authenticated', user: session.user })
@@ -27,7 +22,23 @@ export default function useAuth() {
       }
     })
 
-    return () => subscription.unsubscribe()
+    // Safety net: if INITIAL_SESSION never fires (older Supabase versions),
+    // fall back to getSession after a short delay to avoid stuck loading state
+    const fallback = setTimeout(async () => {
+      if (authState.status !== 'loading') return
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        setAuthState({ status: 'authenticated', user: session.user })
+      } else {
+        setAuthState({ status: 'unauthenticated' })
+      }
+    }, 2000)
+
+    return () => {
+      subscription.unsubscribe()
+      clearTimeout(fallback)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function signInWithEmail(email: string): Promise<{ error: string | null }> {
