@@ -34,6 +34,7 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
   const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastResultTimeRef = useRef<number>(0)
   const consecutiveFailuresRef = useRef(0)
+  const useLocalRef = useRef(true) // try on-device first, disable on failure
   const onWordRef = useRef(onWord)
   const onAutoStopRef = useRef(onAutoStop)
   const onErrorRef = useRef(onError)
@@ -122,8 +123,8 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     rec.continuous = true
     rec.maxAlternatives = 5
 
-    // Try Chrome's on-device recognition if available
-    if ('processLocally' in rec) {
+    // Try Chrome's on-device recognition if available and not previously failed
+    if (useLocalRef.current && 'processLocally' in rec) {
       rec.processLocally = true
       console.log(`${ts()} [CONT] using on-device recognition`)
     }
@@ -187,6 +188,15 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
     rec.onerror = (e: any) => {
       const error = e.error as string
       console.warn(`${ts()} [CONT] error: ${error}`)
+
+      // On-device recognition doesn't have the language pack — fall back to server-based
+      if (error === 'language-not-supported' && useLocalRef.current) {
+        console.log(`${ts()} [CONT] on-device not available for en-US, falling back to server-based`)
+        useLocalRef.current = false
+        recognitionRef.current = null
+        startContinuous()
+        return
+      }
 
       if (FATAL_ERRORS.has(error)) {
         console.error(`${ts()} [CONT] fatal error "${error}" — stopping voice input`)
