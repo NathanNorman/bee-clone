@@ -208,12 +208,18 @@ export default function VoiceInput({ active, onWord, onAutoStop, onError }: Voic
       console.warn(`${ts()} [CONT] error: ${error}`)
 
       // On-device recognition doesn't have the language pack — fall back to server-based
+      // Delay the restart to let Chrome fully clean up the on-device instance
       if (error === 'language-not-supported' && useLocalRef.current) {
         console.log(`${ts()} [CONT] on-device not available for en-US, falling back to server-based`)
         useLocalRef.current = false
-        generationRef.current++ // invalidate this instance's onend
+        generationRef.current++
+        consecutiveFailuresRef.current = 0
         recognitionRef.current = null
-        startContinuous()
+        const t = setTimeout(() => {
+          if (!continuousActiveRef.current) return
+          startContinuous()
+        }, 500)
+        pendingTimeoutsRef.current.push(t)
         return
       }
 
