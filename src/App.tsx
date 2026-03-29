@@ -39,10 +39,11 @@ export default function App() {
   const puzzle = usePuzzle(selectedDate) ?? EMPTY_PUZZLE
 
   const [modal, setModal] = useState<Modal>('none')
-  const hasPromptedAuth = useRef(false)
   useEffect(() => {
-    if (authState.status === 'unauthenticated' && !hasPromptedAuth.current) {
-      hasPromptedAuth.current = true
+    if (
+      authState.status === 'unauthenticated' &&
+      !localStorage.getItem('auth-prompt-dismissed')
+    ) {
       const t = setTimeout(() => setModal('auth'), 1000)
       return () => clearTimeout(t)
     }
@@ -241,7 +242,10 @@ export default function App() {
       {showQueenBee && <QueenBeeCelebration onDismiss={() => setShowQueenBee(false)} />}
 
       {modal === 'auth' && (
-        <AuthPrompt onSignIn={signInWithEmail} onSkip={() => setModal('none')} />
+        <AuthPrompt onSignIn={signInWithEmail} onSkip={() => {
+          localStorage.setItem('auth-prompt-dismissed', '1')
+          setModal('none')
+        }} />
       )}
       {modal === 'hints' && puzzle.answers.length > 0 && (
         <HintsPanel answers={puzzle.answers} foundWords={state.foundWords} onClose={() => setModal('none')} />
