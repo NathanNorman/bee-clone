@@ -48,6 +48,36 @@
   font-weight: 600;
 }
 
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid #e8e8e8;
+}
+
+.tab {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #999;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab:hover { color: #555; }
+
+.tabActive {
+  color: #1a1a1a;
+  border-bottom-color: #f7c835;
+}
+
+/* Two-letter grid */
 .grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -65,3 +95,76 @@
 
 .pair { font-weight: 600; font-size: 0.9rem; }
 .count { font-size: 1.1rem; color: #555; }
+
+/* Word shapes */
+.shapesContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.shapeGroup {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.shapePrefix {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #1a1a1a;
+  width: 28px;
+  flex-shrink: 0;
+  padding-top: 0.3rem;
+  letter-spacing: 0.04em;
+}
+
+.shapeWords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.shapeWord {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  transition: background 0.2s;
+}
+
+.shapeFound {
+  background: #e8f5e9;
+}
+
+.shapeLetters {
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #1a1a1a;
+  letter-spacing: 0.05em;
+}
+
+.shapeFull {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #4caf50;
+  letter-spacing: 0.05em;
+}
+
+.shapeBlanks {
+  display: flex;
+  gap: 3px;
+  margin-left: 3px;
+}
+
+.shapeBlank {
+  width: 8px;
+  height: 2px;
+  background: #bbb;
+  border-radius: 1px;
+  display: inline-block;
+  margin-top: 1px;
+}
